@@ -1,0 +1,3 @@
+# Runtime cuma butuh Python 3.11+ (stdlib: tomllib, sqlite3, urllib).
+# Nggak ada API key.
+pytest>=8.0

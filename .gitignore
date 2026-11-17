@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+.env
+.env.*
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/*
+!data/.gitkeep
+logs/
+.DS_Store
