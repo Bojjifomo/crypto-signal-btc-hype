@@ -94,7 +94,18 @@ Satu sumber error nggak membatalkan yang lain.
 
 ## Cron
 
-Ini bukan GitHub Actions. Cron biasa di mesin lo:
+### Mac: launchd
+
+Di Mac, pakai launchd biar jalan sendiri tiap hari 07:15 waktu lokal (dan kejar begitu Mac bangun kalau tadi lagi sleep):
+
+```bash
+./deploy/install_launchd.sh            # pasang + langsung jalan sekali
+./deploy/install_launchd.sh --remove   # copot
+```
+
+Butuh Python 3.11+ (`brew install python@3.13`). Jam bisa diganti: `HOUR=8 MINUTE=0 ./deploy/install_launchd.sh`. Log di `logs/launchd.log`.
+
+Atau cron biasa (Linux, atau Mac kalau lo lebih suka):
 
 ```cron
 # tiap hari 07:15 WIB = 00:15 UTC
