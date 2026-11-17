@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from cryptomonitor import cycle_report
 from cryptomonitor.lib import fmt_idr, fmt_number, fmt_pct, fmt_px, fmt_usd, fmt_win
 
 V1_PRIOR = [
@@ -41,7 +42,7 @@ def _cell_n(stat: dict) -> str:
 
 def render(bundle: dict) -> str:
     lines: list[str] = []
-    lines.append("# Laporan skor beli v2 — BTC & HYPE")
+    lines.append("# Laporan sinyal beli & jual — BTC & HYPE")
     lines.append("")
     lines.append(f"Dibikin {bundle['generated']}. Buat Andreas, bukan saran buat orang lain.")
     lines.append("")
@@ -50,14 +51,29 @@ def render(bundle: dict) -> str:
         "Ambang nggak digeser setelah angkanya keluar. Kalau hasil v2 jelek, ya gue tulis jelek."
     )
     lines.append("")
-    lines.append("## Skor hari ini")
+    summary = cycle_report.summary_lines(bundle)
+    if summary:
+        lines.append("## Ringkasan: hari ini ngapain")
+        lines.append("")
+        lines.extend(summary)
+        lines.append("")
+    lines.append("## Skor beli hari ini (v2)")
     lines.append("")
     lines.extend(_live_section(bundle))
     lines.append("")
-    lines.append("## Aturan, dikunci sebelum tes")
+    if bundle.get("cycle"):
+        lines.append("## Zona siklus hari ini")
+        lines.append("")
+        lines.extend(cycle_report.live_lines(bundle))
+    lines.append("## Aturan beli v2, dikunci sebelum tes")
     lines.append("")
     lines.extend(_rules_section(bundle["cfg"]))
     lines.append("")
+    if bundle.get("cycle"):
+        lines.append("## Aturan lapisan siklus (sisi jual)")
+        lines.append("")
+        lines.extend(cycle_report.rules_lines(bundle["cfg"]))
+        lines.append("")
     lines.append("## Temuan v1 yang jadi alasan (bukan hitungan ulang)")
     lines.append("")
     lines.append("Ini angka laporan lama. Dipakai buat milih aturan, terus ditaruh di sini biar lo lihat v2 dibanding apa.")
@@ -100,6 +116,9 @@ def render(bundle: dict) -> str:
             lines.append("")
             continue
         lines.extend(_asset_section(asset, block, bundle["cfg"]))
+        cyc_block = (bundle.get("cycle") or {}).get(asset)
+        if cyc_block:
+            lines.extend(cycle_report.asset_lines(asset, cyc_block, bundle["cfg"]))
     lines.append("## Catatan data")
     lines.append("")
     for note in bundle.get("notes") or ["Belum ada catatan fetch."]:
@@ -109,7 +128,8 @@ def render(bundle: dict) -> str:
     lines.append("")
     lines.append(
         "Ini catatan DCA gue sendiri. Sampelnya terbatas, return 90 hari masih saling tumpuk, "
-        "dan ETF cuma ada sejak 2024. Jangan naikkin tranche cuma karena satu sel di tabel hijau."
+        "dan ETF cuma ada sejak 2024. Jangan naikkin tranche cuma karena satu sel di tabel hijau. "
+        "Sisi jual lebih tipis lagi buktinya: empat puncak siklus, dan indikatornya dipilih orang justru karena cocok sama puncak-puncak itu."
     )
     lines.append("")
     return "\n".join(lines)
@@ -451,6 +471,13 @@ def _multiple(sim: dict) -> str:
 
 def console_summary(bundle: dict) -> str:
     lines = [render_live_plain(bundle), ""]
+    for asset, block in (bundle.get("cycle") or {}).items():
+        heat = block["heat"]
+        lines.append(
+            f"{asset} zona={cycle_report.ZONES[block['zone']]} panas={heat.score}/{cycle_report.heat_max(asset, bundle['cfg'])} "
+            f"value={block['value'].score}/4 jual={fmt_number(heat.sell_fraction * 100, 0)}%"
+        )
+    lines.append("")
     for asset in ("BTC", "HYPE"):
         block = bundle["assets"].get(asset)
         if not block:

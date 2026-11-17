@@ -23,6 +23,7 @@ from cryptomonitor.lib import (
     set_meta,
     today_utc,
     upsert_funding,
+    upsert_metrics,
     upsert_prices,
     utc_date_from_ms,
     utc_date_from_s,
@@ -429,6 +430,70 @@ def _fetch_btc_oi(conn, cfg, notes: list[str]) -> None:
     )
 
 
+def fetch_onchain(conn, cfg, notes: list[str]) -> int:
+    """Harga BTC sejak 2010 + MVRV dari CoinMetrics community. Buat lapisan siklus."""
+    url = cfg["sources"]["coinmetrics_btc"]
+    rows: list[tuple] = []
+    pages = 0
+    while url and pages < 10:
+        payload = http_json(url, headers=_ua(cfg), timeout=90)
+        for item in payload.get("data") or []:
+            day = str(item.get("time", ""))[:10]
+            if len(day) != 10:
+                continue
+            for key, name in (("PriceUSD", "price_cm"), ("CapMVRVCur", "mvrv")):
+                raw = item.get(key)
+                if raw in (None, ""):
+                    continue
+                try:
+                    rows.append(("BTC", day, name, float(raw), "coinmetrics"))
+                except ValueError:
+                    continue
+        url = payload.get("next_page_url")
+        pages += 1
+    upsert_metrics(conn, rows)
+    n_mvrv = sum(1 for row in rows if row[2] == "mvrv")
+    n_px = len(rows) - n_mvrv
+    last = max((row[1] for row in rows if row[2] == "mvrv"), default="—")
+    log_fetch(conn, "onchain", bool(rows), f"price_cm={n_px} mvrv={n_mvrv} last={last}")
+    notes.append(
+        f"CoinMetrics community: {n_px} hari harga BTC (dari 2010) + {n_mvrv} hari MVRV, terakhir {last}. "
+        "Cuma dipakai lapisan siklus, skor v2 nggak nyentuh ini."
+    )
+    return len(rows)
+
+
+def fetch_hype_fundamentals(conn, cfg, notes: list[str]) -> int:
+    """Pendapatan Hyperliquid (DefiLlama) + market cap HYPE (CoinGecko, 365 hari)."""
+    rows: list[tuple] = []
+    counts = {}
+    for key, name in (("defillama_hl_revenue", "holders_rev"), ("defillama_hl_fees", "fees")):
+        payload = http_json(cfg["sources"][key], headers=_ua(cfg), timeout=60)
+        chart = payload.get("totalDataChart") or []
+        counts[name] = len(chart)
+        for stamp, value in chart:
+            if value is None:
+                continue
+            rows.append(("HYPE", utc_date_from_s(int(stamp)).isoformat(), name, float(value), "defillama"))
+    try:
+        chart = http_json(cfg["sources"]["coingecko_hype_chart"], headers=_ua(cfg), timeout=40)
+        caps = chart.get("market_caps") or []
+        counts["mcap"] = len(caps)
+        for stamp, value in caps:
+            if value:
+                rows.append(("HYPE", utc_date_from_ms(int(stamp)).isoformat(), "mcap", float(value), "coingecko"))
+    except Exception as exc:  # noqa: BLE001
+        counts["mcap"] = 0
+        notes.append(f"Market cap HYPE CoinGecko gagal ({exc}); P/E HYPE kosong.")
+    upsert_metrics(conn, rows)
+    log_fetch(conn, "hype_fundamentals", bool(rows), json.dumps(counts))
+    notes.append(
+        f"Fundamental HYPE: {counts.get('holders_rev', 0)} hari pendapatan holder + {counts.get('fees', 0)} hari fee "
+        f"(DefiLlama), {counts.get('mcap', 0)} hari market cap (CoinGecko gratis cuma kasih 365 hari)."
+    )
+    return len(rows)
+
+
 def run_fetch(db_path, cfg) -> int:
     conn = connect(db_path)
     notes: list[str] = []
@@ -441,6 +506,8 @@ def run_fetch(db_path, cfg) -> int:
         ("stables", lambda: fetch_stables(conn, cfg, notes)),
         ("fx", lambda: fetch_fx(conn, cfg, notes)),
         ("context", lambda: fetch_context(conn, cfg, notes)),
+        ("onchain", lambda: fetch_onchain(conn, cfg, notes)),
+        ("hype_fundamentals", lambda: fetch_hype_fundamentals(conn, cfg, notes)),
     ]
     failed = []
     for name, job in jobs:
