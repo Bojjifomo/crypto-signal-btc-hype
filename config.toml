@@ -1,0 +1,95 @@
+# Aturan v2 dikunci SEBELUM backtest dijalankan ulang (17 Nov 2026).
+# Ambang ini datang dari temuan v1, bukan dari hasil v2.
+# Jangan digeser biar median-nya kelihatan lebih bagus. Kalau lo ubah,
+# tests/test_signals.py::test_rules_locked wajib diubah juga, dan laporan
+# harus bilang aturannya sudah beda.
+
+[window]
+dedupe_days = 14
+forward_days = [30, 90, 180]
+primary_horizon = 90
+backtest_start = "2018-01-01"
+in_sample_end = "2021-12-31"
+etf_era_start = "2024-01-11"
+shuffle_iters = 1000
+shuffle_seed = 42
+
+[v1]
+# Skor v1 yang gagal: tiga syarat oversold ditumpuk, sinyal kalau ketiganya nyala.
+# 200DMA ikut di sini dan SENGAJA dibuang di v2.
+fg_below = 20
+drawdown_min = 0.25
+sma_days = 200
+threshold = 3
+
+[v2]
+# Inti cuma drawdown dari ATH — satu-satunya sinyal v1 yang ngalahin baseline
+# di kedua siklus. Poin drawdown ini TOTAL (bukan ditambah-tambah).
+#   dd < 25%            → 0
+#   25% <= dd < 50%     → 2  (tranche 1,5x)
+#   dd >= 50%           → 3  (tranche 2x)
+# 50% itu angka bulat yang ditetapkan di depan, bukan hasil digeser-geser.
+drawdown_core = 0.25
+drawdown_core_points = 2
+drawdown_deep = 0.50
+drawdown_deep_points = 3
+
+# Funding 7 hari cuma penegas. Di v1 dia kuat cuma di 2018–21, jadi nggak boleh
+# naikkin tranche kalau drawdown-nya belum masuk inti.
+funding_lookback_days = 7
+funding_min_obs = 4
+funding_negative_points = 1
+funding_requires_core = true
+
+# ETF cuma buat BTC. Kombo F&G<20 + outflow 5 hari antara $500jt dan $1M
+# (n v1 cuma 8) dapat +1, dan cuma kalau inti drawdown sudah nyala.
+# Outflow 5 hari >= $1M sendirian bearish di v1: nggak dapat poin, cuma bendera.
+fg_combo_below = 20
+etf_lookback_prints = 5
+etf_lag_days = 1
+etf_outflow_min_usd = 500000000
+etf_outflow_cap_usd = 1000000000
+etf_combo_points = 1
+etf_combo_requires_core = true
+etf_capitulation_usd = 1000000000
+etf_assets = ["BTC"]
+
+[multiplier]
+max = 2.0
+
+[[multiplier.bands]]
+min_score = 0
+mult = 1.0
+
+[[multiplier.bands]]
+min_score = 2
+mult = 1.5
+
+[[multiplier.bands]]
+min_score = 3
+mult = 2.0
+
+[dca]
+btc_base_idr = 30000000
+hype_base_idr = 7500000
+# Hard invalidation HYPE: daily close di bawah level ini → tranche 0 hari itu.
+# Bukan sticky seumur hidup. HYPE listing jauh di bawah $60; kalau dikunci
+# permanen dari close pertama, belinya mati selamanya.
+hype_invalidation_close = 60.0
+
+[sources]
+binance_vision_klines = "https://data-api.binance.vision/api/v3/klines"
+binance_funding_monthly = "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-{ym}.zip"
+fng = "https://api.alternative.me/fng/?limit=0&format=json"
+hyperliquid = "https://api.hyperliquid.xyz/info"
+coingecko_price = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,hyperliquid&vs_currencies=usd,idr"
+coingecko_global = "https://api.coingecko.com/api/v3/global"
+defillama_stables = "https://stablecoins.llama.fi/stablecoincharts/all"
+farside_btc = "https://farside.co.uk/btc/"
+farside_all = "https://farside.co.uk/bitcoin-etf-flow-all-data/"
+etf_fallback_csv = "https://firsthandbitcoin.com/data/api/series/etfFlow.csv"
+yahoo_usdidr = "https://query1.finance.yahoo.com/v8/finance/chart/USDIDR=X"
+okx_funding = "https://www.okx.com/api/v5/public/funding-rate-history?instId=BTC-USDT-SWAP&limit=100"
+okx_oi = "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history"
+okx_oi_now = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
