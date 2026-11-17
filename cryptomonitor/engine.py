@@ -3,23 +3,89 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from cryptomonitor.backtest import _fx_rate, analyze_asset, coverage_from_maps
+from cryptomonitor.cycle import (
+    build_cycle,
+    cycle_clock,
+    heat_score,
+    levels,
+    regime,
+    value_score,
+    zone_key,
+)
+from cryptomonitor.cycle_backtest import analyze_cycle
+from cryptomonitor.dashboard import render_dashboard
 from cryptomonitor.lib import (
     connect,
     get_meta,
     latest_fetch_notes,
     load_etf,
     load_fear_greed,
+    load_funding_apr,
     load_funding_daily,
     load_fx,
+    load_metric,
     load_prices,
     today_utc,
 )
 from cryptomonitor.report import console_summary, render
 from cryptomonitor.signals import build_features, score_v1, score_v2, tranche_idr
+
+
+def long_prices(conn, asset: str) -> list[tuple[date, float]]:
+    """Harga buat lapisan siklus. BTC disambung CoinMetrics (2010) sebelum Binance mulai."""
+    prices = load_prices(conn, asset)
+    if asset != "BTC" or not prices:
+        return prices
+    first = prices[0][0]
+    older = [(day, value) for day, value in load_metric(conn, "BTC", "price_cm").items() if day < first and value > 0]
+    return sorted(older) + prices
+
+
+def build_cycle_bundle(conn, cfg: dict) -> dict:
+    today = today_utc()
+    fear = load_fear_greed(conn)
+    btc_map = dict(load_prices(conn, "BTC"))
+    window = cfg["window"]
+    out = {}
+    for asset in ("BTC", "HYPE"):
+        prices = long_prices(conn, asset)
+        if len(prices) < 30:
+            continue
+        kwargs = {"funding_apr": load_funding_apr(conn, asset), "fear_greed": fear}
+        if asset == "BTC":
+            kwargs["mvrv"] = load_metric(conn, "BTC", "mvrv")
+            starts = [
+                date.fromisoformat(cfg["cycle"]["start"]),
+                date.fromisoformat(window["backtest_start"]),
+                date.fromisoformat(window["in_sample_end"]) + timedelta(days=1),
+            ]
+        else:
+            kwargs["mcap"] = load_metric(conn, asset, "mcap")
+            kwargs["revenue"] = load_metric(conn, asset, "holders_rev")
+            kwargs["btc_prices"] = btc_map
+            starts = [prices[0][0]]
+        closed = [(day, close) for day, close in prices if day < today]
+        points = build_cycle(asset, closed, cfg, **kwargs)
+        live_points = build_cycle(asset, prices, cfg, **kwargs)
+        point = live_points[-1]
+        prev = live_points[-2] if len(live_points) > 1 else None
+        out[asset] = {
+            "point": point,
+            "heat": heat_score(point, cfg),
+            "value": value_score(point, cfg),
+            "zone": zone_key(point, cfg),
+            "regime": regime(point, prev),
+            "levels": levels(live_points, cfg),
+            "partial": point.day >= today,
+            "clock": cycle_clock(live_points) if asset == "BTC" else [],
+            "bt": analyze_cycle(points, cfg, starts),
+            "points": live_points,
+        }
+    return out
 
 
 def build_bundle(conn, cfg: dict) -> dict:
@@ -95,6 +161,7 @@ def build_bundle(conn, cfg: dict) -> dict:
         "cfg": cfg,
         "live": live,
         "assets": assets,
+        "cycle": build_cycle_bundle(conn, cfg),
         "context": context,
         "notes": latest_fetch_notes(conn),
     }
@@ -135,6 +202,8 @@ def publish(db_path: Path, cfg: dict, report_path: Path) -> int:
         return 1
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render(bundle), encoding="utf-8")
+    dash_path = report_path.with_name("dashboard.html")
+    dash_path.write_text(render_dashboard(bundle), encoding="utf-8")
     print(console_summary(bundle))
-    print(f"laporan ditulis ke {report_path}")
+    print(f"laporan ditulis ke {report_path}, grafik ke {dash_path}")
     return 0

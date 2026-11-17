@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS fx_usd_idr (
     rate REAL NOT NULL,
     source TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS metrics (
+    asset TEXT NOT NULL,
+    date TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value REAL NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (asset, date, name)
+);
 CREATE TABLE IF NOT EXISTS fetch_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL,
@@ -218,6 +226,51 @@ def load_funding_daily(conn: sqlite3.Connection, asset: str) -> dict[date, float
         if not rates:
             rates = next(iter(by_src.values()))
         out[day] = sum(rates) / len(rates)
+    return out
+
+
+def upsert_metrics(conn: sqlite3.Connection, rows: list[tuple]) -> None:
+    # rows: asset, date, name, value, source
+    conn.executemany(
+        """
+        INSERT INTO metrics(asset, date, name, value, source) VALUES (?,?,?,?,?)
+        ON CONFLICT(asset, date, name) DO UPDATE SET value=excluded.value, source=excluded.source
+        """,
+        rows,
+    )
+
+
+def load_metric(conn: sqlite3.Connection, asset: str, name: str) -> dict[date, float]:
+    rows = conn.execute(
+        "SELECT date, value FROM metrics WHERE asset=? AND name=?",
+        (asset, name),
+    ).fetchall()
+    return {date.fromisoformat(r["date"]): float(r["value"]) for r in rows}
+
+
+def load_funding_apr(conn: sqlite3.Connection, asset: str) -> dict[date, float]:
+    """Funding per hari, disetahunkan: jumlah print sehari x 365.
+
+    Binance/OKX 3 print sehari, Hyperliquid 24. Dijumlah per hari biar dua-duanya
+    bisa dibandingin pakai satuan yang sama.
+    """
+    rows = conn.execute(
+        "SELECT ts, rate, source FROM funding WHERE asset=? ORDER BY ts",
+        (asset,),
+    ).fetchall()
+    buckets: dict[date, dict[str, float]] = {}
+    for row in rows:
+        day = utc_date_from_ms(int(row["ts"]))
+        by_src = buckets.setdefault(day, {})
+        by_src[row["source"]] = by_src.get(row["source"], 0.0) + float(row["rate"])
+    out: dict[date, float] = {}
+    for day, by_src in buckets.items():
+        for src in ("binance", "okx", "hyperliquid"):
+            if src in by_src:
+                out[day] = by_src[src] * 365.0
+                break
+        else:
+            out[day] = next(iter(by_src.values())) * 365.0
     return out
 
 

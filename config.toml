@@ -77,6 +77,66 @@ hype_base_idr = 7500000
 # permanen dari close pertama, belinya mati selamanya.
 hype_invalidation_close = 60.0
 
+[cycle]
+# Lapisan siklus (v3): sisi JUAL + kedalaman value. Ditambah 17 Nov 2026.
+# Nggak ngubah tranche v2. Urutannya begini: gue lihat dulu nilai MVRV/Mayer
+# di puncak-puncak lama, dan dari situ kelihatan ambang klasik kelewatan 2021
+# dan 2025. Itu alasan pakai persentil. Angkanya sendiri (persentil 85/95,
+# jendela 4 tahun, tangga 5/10/20%, beli lagi di drawdown 50%) angka bulat yang
+# ditulis sebelum event study dan simulasi dijalankan, dan nggak digeser sesudahnya.
+# Jujur: semua indikator ini populer JUSTRU karena cocok sama siklus lama,
+# jadi nggak ada yang benar-benar luar sampel. Puncak siklus cuma ada 4.
+# tests/test_cycle.py::test_cycle_rules_locked ngunci angka-angka ini.
+start = "2013-01-01"
+forward_days = [90, 180, 365]
+primary_horizon = 365
+pct_window_days = 1460
+pct_min_days = 730
+pct_warm = 0.85
+pct_hot = 0.95
+onchain_lag_days = 1
+blowoff_mvrv = 3.5
+blowoff_two_year_mult = 5.0
+blowoff_points = 2
+funding_days = 30
+# 30% setahun = kira-kira 3x funding normal (0,01% per 8 jam = 11% setahun).
+funding_apr_hot = 0.30
+fg_days = 30
+fg_hot = 75
+# Skor panas dimatiin kalau drawdown sudah masuk inti v2. Satu hari nggak
+# boleh sekaligus "beli 1,5x" dan "jual".
+heat_gate_drawdown = 0.25
+# Value: tiap syarat 1 poin, maks 4. Konteks doang, bukan pengali.
+value_drawdown = 0.50
+value_mayer_below = 0.8
+value_mvrv_below = 1.0
+# P/E HYPE = market cap / (pendapatan holder 30 hari x 365).
+revenue_days = 30
+pe_pct_min_days = 180
+# Simulasi: kas hasil jual dibeliin lagi 1/8 tiap tanggal grid selama drawdown >= 50%.
+redeploy_drawdown = 0.50
+redeploy_fraction = 0.125
+
+# Tangga jual: porsi dari koin yang masih dipegang, per tanggal grid 14 hari.
+[[cycle.sell_bands]]
+min_heat = 2
+fraction = 0.05
+
+[[cycle.sell_bands]]
+min_heat = 4
+fraction = 0.10
+
+[[cycle.sell_bands]]
+min_heat = 6
+fraction = 0.20
+
+[cycle.alt]
+# HYPE: riwayat < 2 tahun, jadi Mayer pakai ambang tetap. Eksperimental.
+mayer_warm = 1.5
+mayer_hot = 2.0
+# Riwayatnya belum 2 tahun, tabel HYPE dibaca di 90 hari.
+primary_horizon = 90
+
 [sources]
 binance_vision_klines = "https://data-api.binance.vision/api/v3/klines"
 binance_funding_monthly = "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-{ym}.zip"
@@ -93,3 +153,7 @@ okx_funding = "https://www.okx.com/api/v5/public/funding-rate-history?instId=BTC
 okx_oi = "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history"
 okx_oi_now = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+coinmetrics_btc = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics=PriceUSD,CapMVRVCur&frequency=1d&page_size=10000&start_time=2010-01-01"
+defillama_hl_revenue = "https://api.llama.fi/summary/fees/hyperliquid?dataType=dailyHoldersRevenue"
+defillama_hl_fees = "https://api.llama.fi/summary/fees/hyperliquid?dataType=dailyFees"
+coingecko_hype_chart = "https://api.coingecko.com/api/v3/coins/hyperliquid/market_chart?vs_currency=usd&days=365&interval=daily"
